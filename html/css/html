@@ -1,0 +1,252 @@
+```html
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Combat Zombie</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: #10151c;
+    color: white; font-family: Arial, sans-serif; text-align: center;
+  }
+  h1 { margin: 8px 0; }
+  canvas {
+    display: block; width: 100%; max-width: 800px;
+    margin: 14px auto; background: #202b28;
+    border: 2px solid #43534c; border-radius: 12px;
+  }
+  .controls {
+    display: flex; justify-content: center;
+    align-items: center; gap: 24px;
+  }
+  .pad {
+    display: grid; grid-template-columns: repeat(3, 54px);
+    gap: 5px;
+  }
+  button {
+    border: 0; border-radius: 10px; padding: 15px;
+    background: #344454; color: white; font-size: 18px;
+    cursor: pointer; touch-action: none; user-select: none;
+  }
+  button:active { background: #577087; }
+  #attack { background: #be433c; min-height: 70px; }
+  #restart { margin-top: 15px; background: #287653; }
+  p { color: #c3cdd0; }
+</style>
+</head>
+<body>
+<h1>🧟 Combat Zombie</h1>
+<div id="stats"></div>
+<canvas id="game" width="800" height="480"></canvas>
+
+<div class="controls">
+  <div class="pad">
+    <span></span><button data-key="arrowup" aria-label="Haut">▲</button><span></span>
+    <button data-key="arrowleft" aria-label="Gauche">◀</button>
+    <button data-key="arrowdown" aria-label="Bas">▼</button>
+    <button data-key="arrowright" aria-label="Droite">▶</button>
+  </div>
+  <button id="attack">🥊 Frapper</button>
+</div>
+<button id="restart">Recommencer</button>
+<p>Flèches / ZQSD : bouger · Espace : frapper</p>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const stats = document.getElementById("stats");
+const keys = new Set();
+const W = canvas.width, H = canvas.height;
+let player, zombies, heals, wave, score, cooldown, flash, dead;
+
+function spawnWave() {
+  wave++;
+  const bossWave = wave % 5 === 0;
+  for (let i = 0; i < 3 + wave; i++) {
+    const side = Math.floor(Math.random() * 4);
+    const boss = bossWave && i === 0;
+    zombies.push({
+      x: side === 0 ? -25 : side === 1 ? W + 25 : Math.random() * W,
+      y: side === 2 ? -25 : side === 3 ? H + 25 : Math.random() * H,
+      radius: boss ? 28 : 15,
+      hp: boss ? 10 + wave : 2 + Math.floor(wave / 4),
+      speed: boss ? 38 : 40 + Math.min(wave * 4, 70),
+      boss
+    });
+  }
+}
+
+function reset() {
+  player = { x: W / 2, y: H / 2, hp: 100, invincible: 0 };
+  zombies = [];
+  heals = [];
+  wave = score = cooldown = flash = 0;
+  dead = false;
+  keys.clear();
+  spawnWave();
+}
+
+function attack() {
+  if (dead || cooldown > 0) return;
+  cooldown = 0.35;
+  flash = 0.14;
+
+  for (const z of zombies) {
+    const dx = z.x - player.x, dy = z.y - player.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 72 + z.radius) {
+      z.hp--;
+      z.x += dx / (distance || 1) * 25;
+      z.y += dy / (distance || 1) * 25;
+      if (z.hp <= 0) {
+        score += z.boss ? 100 : 10;
+        if (Math.random() < 0.22) {
+          heals.push({
+            x: Math.max(15, Math.min(W - 15, z.x)),
+            y: Math.max(15, Math.min(H - 15, z.y))
+          });
+        }
+      }
+    }
+  }
+  zombies = zombies.filter(z => z.hp > 0);
+}
+
+window.addEventListener("keydown", event => {
+  const key = event.key.toLowerCase();
+  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " ",
+       "z", "q", "s", "d", "w", "a"].includes(key)) {
+    event.preventDefault();
+    keys.add(key);
+  }
+});
+window.addEventListener("keyup", event => {
+  keys.delete(event.key.toLowerCase());
+});
+window.addEventListener("blur", () => keys.clear());
+
+document.querySelectorAll("[data-key], #attack").forEach(button => {
+  const key = button.dataset.key || " ";
+  button.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    button.setPointerCapture(event.pointerId);
+    keys.add(key);
+  });
+  const release = () => keys.delete(key);
+  button.addEventListener("pointerup", release);
+  button.addEventListener("pointercancel", release);
+  button.addEventListener("lostpointercapture", release);
+});
+document.getElementById("restart").onclick = reset;
+
+function update(dt) {
+  if (dead) return;
+  cooldown = Math.max(0, cooldown - dt);
+  flash = Math.max(0, flash - dt);
+  player.invincible = Math.max(0, player.invincible - dt);
+
+  let dx = Number(keys.has("arrowright") || keys.has("d"))
+         - Number(keys.has("arrowleft") || keys.has("q") || keys.has("a"));
+  let dy = Number(keys.has("arrowdown") || keys.has("s"))
+         - Number(keys.has("arrowup") || keys.has("z") || keys.has("w"));
+  const length = Math.hypot(dx, dy) || 1;
+  player.x = Math.max(18, Math.min(W - 18, player.x + dx / length * 190 * dt));
+  player.y = Math.max(18, Math.min(H - 18, player.y + dy / length * 190 * dt));
+
+  if (keys.has(" ")) attack();
+
+  for (const z of zombies) {
+    const vx = player.x - z.x, vy = player.y - z.y;
+    const distance = Math.hypot(vx, vy) || 1;
+    z.x += vx / distance * z.speed * dt;
+    z.y += vy / distance * z.speed * dt;
+    if (distance < z.radius + 17 && player.invincible <= 0) {
+      player.hp = Math.max(0, player.hp - (z.boss ? 25 : 10));
+      player.invincible = 0.7;
+      if (player.hp === 0) {
+        dead = true;
+        return;
+      }
+    }
+  }
+
+  heals = heals.filter(h => {
+    if (Math.hypot(player.x - h.x, player.y - h.y) < 28) {
+      player.hp = Math.min(100, player.hp + 20);
+      return false;
+    }
+    return true;
+  });
+  if (!zombies.length) spawnWave();
+}
+
+function circle(x, y, radius, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#2b3832";
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  for (const h of heals) {
+    ctx.fillStyle = "#50ed96";
+    ctx.fillRect(h.x - 4, h.y - 12, 8, 24);
+    ctx.fillRect(h.x - 12, h.y - 4, 24, 8);
+  }
+  for (const z of zombies) {
+    circle(z.x, z.y, z.radius, z.boss ? "#b55bc9" : "#81aa48");
+    circle(z.x - 5, z.y - 4, 3, "#e63232");
+    circle(z.x + 5, z.y - 4, 3, "#e63232");
+  }
+  if (flash > 0) {
+    circle(player.x, player.y, 72, "#ffd66b55");
+    ctx.strokeStyle = "#ffd66b";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, 72, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  circle(player.x, player.y, 17,
+    player.invincible > 0 ? "#ffffff" : "#56baff");
+  circle(player.x - 15, player.y + 10, 7, "#f3c182");
+  circle(player.x + 15, player.y + 10, 7, "#f3c182");
+
+  stats.textContent = `❤️ Vie : ${player.hp} · 🌊 Vague : ${wave} · ⭐ Score : ${score}`;
+  if (dead) {
+    ctx.fillStyle = "#000b";
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "white";
+    ctx.font = "bold 44px Arial";
+    ctx.fillText("FIN DE PARTIE", W / 2, H / 2 - 15);
+    ctx.font = "22px Arial";
+    ctx.fillText(`Score : ${score} — Vague : ${wave}`, W / 2, H / 2 + 30);
+  }
+}
+
+let previous = 0;
+function loop(time) {
+  const dt = Math.min((time - previous) / 1000, 0.04);
+  previous = time;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+reset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
+```
